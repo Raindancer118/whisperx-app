@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisperx-app"
+version = "0.1.0"
+description = "CLI + REST API for WhisperX transcription with accurate speaker diarization"
+authors = [{ name = "Raindancer118", email = "tom560stieh@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.10"
+
+# Minimal bootstrap dependencies — heavy ML packages are installed on first run
+# via whisperx_app/installer.py
+dependencies = [
+    "typer[all]>=0.12",
+    "rich>=14.0",
+    "prompt_toolkit>=3.0",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+]
+
+[project.optional-dependencies]
+# Full ML + API stack — installed automatically by the app on first run
+full = [
+    "whisperx>=3.1",
+    "torch>=2.0",
+    "pyannote.audio>=3.1",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "python-jose[cryptography]>=3.3",
+    "aiofiles>=23.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "respx>=0.21",
+    "cryptography>=42.0",
+]
+
+[project.scripts]
+whisperx-app = "whisperx_app.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["whisperx_app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: requires downloaded models and hardware (skip in CI)",
+]
+
+[tool.coverage.run]
+source = ["whisperx_app"]
+omit = ["tests/*"]
