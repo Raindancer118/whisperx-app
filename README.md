@@ -14,11 +14,23 @@ CLI + REST API für schnelle Audio-Transkription mit genauer Sprecher-Diarisieru
 
 ## Installation
 
-> Empfohlen: Python 3.11 in einer virtuellen Umgebung
+### One-Line-Install (empfohlen)
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
+curl -sSL https://raw.githubusercontent.com/Raindancer118/whisperx-app/main/install.sh | bash
+```
+
+Das Skript:
+- prüft Python 3.10+
+- installiert via **pipx** (global, sauber isoliert) oder fällt auf eine dedizierte venv zurück
+- legt `whisperx-app` automatisch auf den PATH
+- prüft ffmpeg und gibt Hinweise falls es fehlt
+
+### Manuell (alternativ)
+
+```bash
+pipx install whisperx-app
+# oder:
 pip install whisperx-app
 ```
 
@@ -32,14 +44,9 @@ whisperx-app
 ### Systemabhängigkeit: ffmpeg
 
 ```bash
-# Arch/Manjaro
-sudo pacman -S ffmpeg
-
-# Debian/Ubuntu
-sudo apt install ffmpeg
-
-# macOS
-brew install ffmpeg
+sudo pacman -S ffmpeg      # Arch / Manjaro
+sudo apt install ffmpeg    # Debian / Ubuntu
+brew install ffmpeg        # macOS
 ```
 
 ## Verwendung
