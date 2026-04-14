@@ -8,6 +8,7 @@ Commands:
   whisperx-app check              Run startup self-tests and exit
   whisperx-app deps               Show dependency status
   whisperx-app uninstall          Remove packages installed by this app
+  whisperx-app update             Check for updates and install if available
 """
 
 from __future__ import annotations
@@ -137,6 +138,19 @@ def cmd_uninstall(
 
 
 # ---------------------------------------------------------------------------
+# whisperx-app update
+# ---------------------------------------------------------------------------
+
+@app.command("update")
+def cmd_update(
+    force: Annotated[bool, typer.Option("--force", "-f", help="TTL ignorieren, immer PyPI prüfen")] = False,
+) -> None:
+    """Auf neue Version prüfen und bei Bedarf aktualisieren."""
+    from whisperx_app.updater import check_and_update
+    check_and_update(force=force)
+
+
+# ---------------------------------------------------------------------------
 # whisperx-app transcribe
 # ---------------------------------------------------------------------------
 
@@ -232,6 +246,14 @@ def _interactive_flow() -> None:
     # 1. Startup checks
     results = run_startup_checks(verbose=True)
     assert_no_fatal_failures(results)
+
+    # 1b. Non-blocking update check (respects 24h TTL)
+    try:
+        from whisperx_app.updater import check_for_updates_on_startup
+        check_for_updates_on_startup()
+    except Exception:
+        pass  # Never let an update check crash the app
+
     console.print()
 
     # 2. Dependency check / install
