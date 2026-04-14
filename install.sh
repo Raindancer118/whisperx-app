@@ -139,19 +139,16 @@ _progress_header() {
 clear 2>/dev/null || true
 printf "%b" "$HIDE_CURSOR"
 
+printf "${C_CYAN}${BOLD}"
+echo "  ██╗    ██╗██╗  ██╗██╗███████╗██████╗ ███████╗██████╗     ██╗  ██╗"
+echo "  ██║    ██║██║  ██║██║██╔════╝██╔══██╗██╔════╝██╔══██╗    ╚██╗██╔╝"
+echo "  ██║ █╗ ██║███████║██║███████╗██████╔╝█████╗  ██████╔╝     ╚███╔╝ "
+echo "  ██║███╗██║██╔══██║██║╚════██║██╔═══╝ ██╔══╝  ██╔══██╗     ██╔██╗ "
+echo "  ╚███╔███╔╝██║  ██║██║███████║██║     ███████╗██║  ██║    ██╔╝ ██╗"
+echo "   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝╚══════╝╚═╝     ╚══════╝╚═╝  ╚═╝    ╚═╝  ╚═╝"
+printf "${RESET}"
 echo ""
-_box_top
-_box_row ""
-_box_row "$(printf "  ${C_CYAN}${BOLD}  ██╗    ██╗██╗  ██╗██╗███████╗██████╗ ███████╗██████╗     ██╗  ██╗${RESET}")"
-_box_row "$(printf "  ${C_CYAN}${BOLD}  ██║    ██║██║  ██║██║██╔════╝██╔══██╗██╔════╝██╔══██╗    ╚██╗██╔╝${RESET}")"
-_box_row "$(printf "  ${C_CYAN}${BOLD}  ██║ █╗ ██║███████║██║███████╗██████╔╝█████╗  ██████╔╝     ╚███╔╝ ${RESET}")"
-_box_row "$(printf "  ${C_CYAN}${BOLD}  ██║███╗██║██╔══██║██║╚════██║██╔═══╝ ██╔══╝  ██╔══██╗     ██╔██╗ ${RESET}")"
-_box_row "$(printf "  ${C_CYAN}${BOLD}  ╚███╔███╔╝██║  ██║██║███████║██║     ███████╗██║  ██║    ██╔╝ ██╗${RESET}")"
-_box_row "$(printf "  ${C_CYAN}${BOLD}   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝╚══════╝╚═╝     ╚══════╝╚═╝  ╚═╝    ╚═╝  ╚═╝${RESET}")"
-_box_row ""
-_box_row "$(printf "      ${C_WHITE}Audio-Transkription mit Sprecher-Diarisierung${RESET}  ${C_GRAY}· CLI Installer${RESET}")"
-_box_row ""
-_box_bottom
+printf "  ${C_GRAY}Audio-Transkription mit Sprecher-Diarisierung${RESET}  ${DIM}·  CLI Installer${RESET}\n"
 
 echo ""
 printf "  ${C_WHITE}${BOLD}Hey, willkommen! 👋${RESET}\n"
