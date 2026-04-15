@@ -165,54 +165,51 @@ if [ -z "$PYTHON" ]; then
   _info "Installiere Python 3.11 über Paketmanager..."
 
   PY_INSTALLED=false
-  if command -v pacman &>/dev/null && sudo -n true 2>/dev/null; then
-    # Sync package database first (avoids "target not found" on stale DBs)
-    _info "Paket-Datenbank aktualisieren (pacman -Sy)..."
-    sudo pacman -Sy --noconfirm >/tmp/wx_py.log 2>&1 || true
-    # On Arch/Manjaro the package is 'python311' (no dot) in extra repo
-    _info "Installiere python311 via pacman..."
-    if sudo pacman -S --noconfirm python311 >>/tmp/wx_py.log 2>&1; then
-      _ok "Python 3.11 installiert (pacman)"
-      PY_INSTALLED=true
-    else
-      _info "python311 nicht im Repo — versuche python3.11..."
-      if sudo pacman -S --noconfirm python3.11 >>/tmp/wx_py.log 2>&1; then
-        _ok "Python 3.11 installiert (pacman)"
-        PY_INSTALLED=true
-      fi
-    fi
 
+  # ── Manjaro / Arch: prefer pamac (handles both official repos + AUR) ──────
+  if command -v pamac &>/dev/null; then
+    _info "Manjaro erkannt — nutze pamac (unterstützt AUR)..."
+    for pkg in python311 python312 python313; do
+      _info "Versuche $pkg..."
+      if pamac install --no-confirm "$pkg" >/tmp/wx_py.log 2>&1; then
+        _ok "Python installiert via pamac ($pkg)"
+        PY_INSTALLED=true
+        break
+      fi
+    done
+
+  # ── Arch ohne pamac: pacman mit DB-Sync ────────────────────────────────────
+  elif command -v pacman &>/dev/null && sudo -n true 2>/dev/null; then
+    _info "Paket-Datenbank synchronisieren..."
+    sudo pacman -Sy --noconfirm >/tmp/wx_py.log 2>&1 || true
+    for pkg in python311 python312 python313; do
+      _info "Versuche $pkg via pacman..."
+      if sudo pacman -S --noconfirm "$pkg" >>/tmp/wx_py.log 2>&1; then
+        _ok "Python installiert (pacman: $pkg)"
+        PY_INSTALLED=true
+        break
+      fi
+    done
+
+  # ── Debian / Ubuntu ────────────────────────────────────────────────────────
   elif command -v apt-get &>/dev/null && sudo -n true 2>/dev/null; then
     _run "apt update"                     sudo apt-get update -qq
     _run "Python 3.11 installieren (apt)" sudo apt-get install -y python3.11 python3.11-venv
     PY_INSTALLED=true
 
+  # ── macOS (Homebrew) ───────────────────────────────────────────────────────
   elif command -v brew &>/dev/null; then
     _run "Python 3.11 installieren (brew)" brew install python@3.11
     PY_INSTALLED=true
   fi
 
-  # ── pyenv fallback: works on any Linux/macOS if package manager failed ──
   if ! $PY_INSTALLED; then
-    _warn "Paketmanager konnte Python 3.11 nicht installieren — versuche pyenv..."
-    export PYENV_ROOT="$HOME/.pyenv"
-    if [ ! -d "$PYENV_ROOT" ]; then
-      _info "pyenv installieren..."
-      curl -fsSL https://pyenv.run | bash >/tmp/wx_pyenv.log 2>&1 \
-        || _die "pyenv-Installation fehlgeschlagen. Bitte Python 3.11 manuell installieren: https://www.python.org/downloads/"
-    fi
-    export PATH="$PYENV_ROOT/bin:$PATH"
-    eval "$(pyenv init - 2>/dev/null)" 2>/dev/null || true
-    _info "Python 3.11 via pyenv installieren (das dauert einen Moment)..."
-    if pyenv install -s 3.11.9 >/tmp/wx_pyenv.log 2>&1; then
-      PYTHON="$PYENV_ROOT/versions/3.11.9/bin/python3"
-      PY_VER="3.11"
-      _ok "Python 3.11 via pyenv installiert"
-      PY_INSTALLED=true
-    else
-      cat /tmp/wx_pyenv.log >&2
-      _die "Python 3.11 konnte nicht installiert werden. Bitte manuell: https://www.python.org/downloads/"
-    fi
+    _err "Python 3.11–3.13 konnte nicht automatisch installiert werden."
+    printf "\n  Bitte manuell installieren:\n"
+    printf "    ${C_CYAN}sudo pamac install python311${RESET}   (Manjaro)\n"
+    printf "    ${C_CYAN}sudo apt install python3.11${RESET}    (Ubuntu/Debian)\n"
+    printf "    ${C_CYAN}brew install python@3.11${RESET}       (macOS)\n\n"
+    exit 1
   fi
 
   # Re-check after install
