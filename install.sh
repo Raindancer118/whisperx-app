@@ -77,6 +77,41 @@ _run() {
   fi
 }
 
+# Progress bar (time-based): 0→90% while running, snaps to 100% on done.
+# Usage: _run_bar LABEL EST_SECONDS cmd [args...]
+# Returns exit code — does NOT call exit, so callers can handle failures.
+_run_bar() {
+  local label=$1 est=${2:-60}; shift 2
+  rm -f /tmp/wx_install.log
+  ("$@" &>/tmp/wx_install.log) &
+  local pid=$! start elapsed pct w filled empty bf be
+  start=$(date +%s)
+  printf "%b" "$HIDE_CURSOR"
+  while kill -0 "$pid" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - start ))
+    pct=$(( elapsed * 90 / est )); [ "$pct" -gt 90 ] && pct=90
+    w=$(( $(_width) - 20 )); [ "$w" -lt 10 ] && w=10
+    filled=$(( pct * w / 100 )); empty=$(( w - filled ))
+    bf=""; be=""
+    [ "$filled" -gt 0 ] && bf=$(printf "%${filled}s" "" | tr ' ' '█')
+    [ "$empty"  -gt 0 ] && be=$(printf "%${empty}s"  "" | tr ' ' '░')
+    printf "  ${C_GRAY}[${C_GREEN}%s${C_GRAY}%s${C_GRAY}]${RESET} ${C_WHITE}%3d%%${RESET}  ${C_GRAY}%s${RESET}\r" \
+      "$bf" "$be" "$pct" "$label"
+    sleep 0.5
+  done
+  printf "%b" "$SHOW_CURSOR$CR"
+  if wait "$pid"; then
+    w=$(( $(_width) - 20 )); [ "$w" -lt 10 ] && w=10
+    bf=$(printf "%${w}s" "" | tr ' ' '█')
+    printf "  ${C_GRAY}[${C_GREEN}%s${C_GRAY}]${RESET} ${C_WHITE}100%%${RESET}  ${C_GRAY}%s${RESET}\n" "$bf" "$label"
+    return 0
+  else
+    _err "$label fehlgeschlagen"
+    cat /tmp/wx_install.log >&2
+    return 1
+  fi
+}
+
 # Ensure a dir is on PATH and persisted to shell rc
 _ensure_path() {
   local dir="$1"
@@ -166,43 +201,44 @@ if [ -z "$PYTHON" ]; then
 
   PY_INSTALLED=false
 
-  # ── Manjaro / Arch: prefer pamac (handles both official repos + AUR) ──────
-  # Run as sudo so pamac uses the already-cached sudo credentials instead of
-  # triggering a separate polkit password prompt.
-  if command -v pamac &>/dev/null && sudo -n true 2>/dev/null; then
-    _info "Manjaro erkannt — nutze pamac (unterstützt AUR)..."
-    for pkg in python311 python312 python313; do
-      _info "Versuche $pkg..."
-      if sudo pamac install --no-confirm "$pkg" >/tmp/wx_py.log 2>&1; then
-        _ok "Python installiert via pamac ($pkg)"
+  # ── uv: pre-built Python binary, no root/polkit needed ────────────────────
+  # uv is the most reliable cross-platform method: downloads a pre-built
+  # Python 3.11 binary in seconds, no compilation, no system privileges.
+  UV_BIN=""
+  if command -v uv &>/dev/null; then
+    UV_BIN=$(command -v uv)
+  else
+    _info "uv installieren (Python-Versions-Manager)..."
+    if curl -LsSf https://astral.sh/uv/install.sh | sh >/tmp/wx_uv.log 2>&1; then
+      # uv installs to ~/.local/bin or ~/.cargo/bin
+      for d in "$HOME/.local/bin" "$HOME/.cargo/bin"; do
+        [ -x "$d/uv" ] && UV_BIN="$d/uv" && break
+      done
+      [ -n "$UV_BIN" ] && export PATH="$(dirname "$UV_BIN"):$PATH"
+    fi
+  fi
+
+  if [ -n "$UV_BIN" ]; then
+    _info "Python 3.11 via uv installieren (vorcompiliertes Binary, kein Root nötig)..."
+    if _run_bar "Python 3.11 herunterladen" 60 "$UV_BIN" python install 3.11; then
+      PYTHON=$("$UV_BIN" python find 3.11 2>/dev/null || true)
+      if [ -n "$PYTHON" ] && [ -x "$PYTHON" ]; then
+        PY_VER="3.11"
+        _ok "Python 3.11 via uv  ${C_GRAY}($PYTHON)${RESET}"
         PY_INSTALLED=true
-        break
       fi
-    done
+    fi
+  fi
 
-  # ── Arch ohne pamac: pacman mit DB-Sync ────────────────────────────────────
-  elif command -v pacman &>/dev/null && sudo -n true 2>/dev/null; then
-    _info "Paket-Datenbank synchronisieren..."
-    sudo pacman -Sy --noconfirm >/tmp/wx_py.log 2>&1 || true
-    for pkg in python311 python312 python313; do
-      _info "Versuche $pkg via pacman..."
-      if sudo pacman -S --noconfirm "$pkg" >>/tmp/wx_py.log 2>&1; then
-        _ok "Python installiert (pacman: $pkg)"
-        PY_INSTALLED=true
-        break
-      fi
-    done
+  # ── Fallback: Debian / Ubuntu ──────────────────────────────────────────────
+  if ! $PY_INSTALLED && command -v apt-get &>/dev/null && sudo -n true 2>/dev/null; then
+    _run_bar "apt update" 30 sudo apt-get update -qq || true
+    _run_bar "Python 3.11 installieren (apt)" 60 \
+      sudo apt-get install -y python3.11 python3.11-venv && PY_INSTALLED=true
 
-  # ── Debian / Ubuntu ────────────────────────────────────────────────────────
-  elif command -v apt-get &>/dev/null && sudo -n true 2>/dev/null; then
-    _run "apt update"                     sudo apt-get update -qq
-    _run "Python 3.11 installieren (apt)" sudo apt-get install -y python3.11 python3.11-venv
-    PY_INSTALLED=true
-
-  # ── macOS (Homebrew) ───────────────────────────────────────────────────────
-  elif command -v brew &>/dev/null; then
-    _run "Python 3.11 installieren (brew)" brew install python@3.11
-    PY_INSTALLED=true
+  # ── Fallback: macOS (Homebrew) ─────────────────────────────────────────────
+  elif ! $PY_INSTALLED && command -v brew &>/dev/null; then
+    _run_bar "Python 3.11 installieren (brew)" 120 brew install python@3.11 && PY_INSTALLED=true
   fi
 
   if ! $PY_INSTALLED; then
@@ -271,9 +307,9 @@ mkdir -p "$LOCAL_BIN"
 if [ -d "$VENV_DIR" ]; then
   _info "Bestehende Umgebung gefunden — wird aktualisiert"
 else
-  _run "Virtuelle Umgebung erstellen" "$PYTHON" -m venv "$VENV_DIR"
+  _run_bar "Virtuelle Umgebung erstellen" 20 "$PYTHON" -m venv "$VENV_DIR" || exit 1
 fi
-_run "pip upgraden"  "$VENV_DIR/bin/pip" install --upgrade pip --quiet
+_run_bar "pip upgraden" 30 "$VENV_DIR/bin/pip" install --upgrade pip --quiet || exit 1
 
 PIP="$VENV_DIR/bin/pip"
 
@@ -289,15 +325,15 @@ printf "  ${C_GRAY}Perfekter Zeitpunkt für einen Kaffee. ☕${RESET}\n"
 echo ""
 
 # PyTorch first (heaviest, resolves version constraints early)
-_run "PyTorch installieren (~500 MB)"       "$PIP" install "torch>=2.0" --quiet
-_run "torchaudio installieren"              "$PIP" install "torchaudio>=2.0" --quiet
-_run "faster-whisper installieren"          "$PIP" install "faster-whisper>=1.0" --quiet
-_run "whisperx installieren"                "$PIP" install "whisperx>=3.1" --quiet
-_run "pyannote.audio installieren"          "$PIP" install "pyannote.audio>=3.1" --quiet
-_run "librosa + soundfile installieren"     "$PIP" install "librosa>=0.10" "soundfile>=0.12" --quiet
-_run "FastAPI + uvicorn installieren"       "$PIP" install "fastapi>=0.115" "uvicorn[standard]>=0.30" "python-multipart>=0.0.9" --quiet
-_run "JWT + crypto installieren"            "$PIP" install "python-jose[cryptography]>=3.3" --quiet
-_run "pydantic + utils installieren"        "$PIP" install "pydantic>=2.0" "pydantic-settings>=2.0" "aiofiles>=23.0" "httpx>=0.27" --quiet
+_run_bar "PyTorch installieren (~500 MB)"   300  "$PIP" install "torch>=2.0" --quiet            || exit 1
+_run_bar "torchaudio installieren"          120  "$PIP" install "torchaudio>=2.0" --quiet       || exit 1
+_run_bar "faster-whisper installieren"       60  "$PIP" install "faster-whisper>=1.0" --quiet   || exit 1
+_run_bar "whisperx installieren"            120  "$PIP" install "whisperx>=3.1" --quiet         || exit 1
+_run_bar "pyannote.audio installieren"      180  "$PIP" install "pyannote.audio>=3.1" --quiet   || exit 1
+_run_bar "librosa + soundfile installieren"  60  "$PIP" install "librosa>=0.10" "soundfile>=0.12" --quiet || exit 1
+_run_bar "FastAPI + uvicorn installieren"    60  "$PIP" install "fastapi>=0.115" "uvicorn[standard]>=0.30" "python-multipart>=0.0.9" --quiet || exit 1
+_run_bar "JWT + crypto installieren"         40  "$PIP" install "python-jose[cryptography]>=3.3" --quiet || exit 1
+_run_bar "pydantic + utils installieren"     60  "$PIP" install "pydantic>=2.0" "pydantic-settings>=2.0" "aiofiles>=23.0" "httpx>=0.27" --quiet || exit 1
 
 _progress "ML-Pakete ✓"
 
@@ -309,9 +345,9 @@ _step "WhisperX-App installieren"
 GITHUB_URL="git+https://github.com/Raindancer118/whisperx-app.git"
 
 if "$VENV_DIR/bin/whisperx-app" --version &>/dev/null 2>&1; then
-  _run "WhisperX-App aktualisieren" "$PIP" install --upgrade "$GITHUB_URL" --quiet
+  _run_bar "WhisperX-App aktualisieren" 60 "$PIP" install --upgrade "$GITHUB_URL" --quiet || exit 1
 else
-  _run "WhisperX-App installieren"  "$PIP" install "$GITHUB_URL" --quiet
+  _run_bar "WhisperX-App installieren"  60 "$PIP" install "$GITHUB_URL" --quiet || exit 1
 fi
 
 # Wrapper script in ~/.local/bin so it's globally available
