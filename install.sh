@@ -32,7 +32,7 @@ _warn()   { printf "  ${C_YELLOW}!${RESET}  %b\n" "$*"; }
 _err()    { printf "  ${C_RED}✗${RESET}  %b\n" "$*" >&2; }
 _die()    { _err "$*"; printf "%b" "$SHOW_CURSOR"; exit 1; }
 
-TOTAL_STEPS=8; CURRENT_STEP=0
+TOTAL_STEPS=10; CURRENT_STEP=0
 
 _step() {
   CURRENT_STEP=$(( CURRENT_STEP + 1 ))
@@ -158,6 +158,18 @@ printf "  ${C_GRAY}Lehn dich zurück. Wir sind gleich fertig. ✌️${RESET}\n"
 echo ""
 _line
 
+# ── URL abfragen (vor allen Steps, Cursor muss sichtbar sein) ─────────────
+printf "%b" "$SHOW_CURSOR"
+echo ""
+printf "  ${C_WHITE}${BOLD}Unter welcher URL soll die Web-App erreichbar sein?${RESET}\n"
+printf "  ${C_GRAY}Beispiel: https://whisperx.meinedomain.de  oder  http://localhost${RESET}\n"
+printf "  ${C_CYAN}URL${RESET} ${C_GRAY}[http://localhost]:${RESET} "
+read -r INSTALL_APP_URL || true
+INSTALL_APP_URL="${INSTALL_APP_URL:-http://localhost}"
+echo ""
+printf "  ${C_GREEN}✓${RESET}  ${C_GRAY}App-URL:${RESET} ${C_WHITE}${INSTALL_APP_URL}${RESET}\n"
+printf "%b" "$HIDE_CURSOR"
+
 # ════════════════════════════════════════════════════════════
 # STEP 1: SUDO
 # ════════════════════════════════════════════════════════════
@@ -177,7 +189,53 @@ fi
 _progress "Berechtigungen ✓"
 
 # ════════════════════════════════════════════════════════════
-# STEP 2: PYTHON (whisperx braucht 3.10–3.13, NICHT 3.14+)
+# STEP 2: DOCKER
+# ════════════════════════════════════════════════════════════
+_step "Docker installieren"
+
+if command -v docker &>/dev/null && docker compose version &>/dev/null 2>&1; then
+  _ok "Docker $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) bereits installiert"
+else
+  _info "Docker wird installiert..."
+
+  if command -v pacman &>/dev/null && sudo -n true 2>/dev/null; then
+    _run_bar "Docker installieren (pacman)" 60 \
+      sudo pacman -S --noconfirm docker docker-compose || exit 1
+
+  elif command -v apt-get &>/dev/null && sudo -n true 2>/dev/null; then
+    _run_bar "apt update" 20 sudo apt-get update -qq || true
+    _run_bar "Docker installieren (apt)" 90 \
+      sudo apt-get install -y docker.io docker-compose-plugin || exit 1
+
+  elif command -v dnf &>/dev/null && sudo -n true 2>/dev/null; then
+    _run_bar "Docker installieren (dnf)" 90 \
+      sudo dnf install -y docker docker-compose-plugin || exit 1
+
+  elif command -v brew &>/dev/null; then
+    _run_bar "Docker installieren (brew)" 120 brew install --cask docker || exit 1
+
+  else
+    _die "Kein Paketmanager gefunden. Bitte Docker manuell installieren: https://docs.docker.com/get-docker/"
+  fi
+
+  # Docker-Dienst starten und aktivieren
+  if command -v systemctl &>/dev/null; then
+    sudo systemctl enable --now docker &>/dev/null || true
+  fi
+
+  # Nutzer zur docker-Gruppe hinzufügen (kein sudo für docker nötig)
+  if id -nG "$USER" 2>/dev/null | grep -qv docker; then
+    sudo usermod -aG docker "$USER" 2>/dev/null || true
+    _info "Nutzer zur docker-Gruppe hinzugefügt (gilt ab nächstem Login)"
+  fi
+
+  _ok "Docker installiert"
+fi
+
+_progress "Docker ✓"
+
+# ════════════════════════════════════════════════════════════
+# STEP 3: PYTHON (whisperx braucht 3.10–3.13, NICHT 3.14+)
 # ════════════════════════════════════════════════════════════
 _step "Python 3.10–3.13 finden"
 
@@ -410,45 +468,11 @@ with open('$HF_CFG', 'w') as f: json.dump(d, f, indent=2)
   fi
 fi
 
-# ── Docker .env (nur wenn docker-compose.yml im aktuellen Verzeichnis) ────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
-ENV_FILE="$SCRIPT_DIR/.env"
-
-if [ -f "$SCRIPT_DIR/docker-compose.yml" ]; then
-  _info "docker-compose.yml gefunden — generiere .env..."
-
-  # Helper: wert aus .env lesen
-  _env_get() { grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo ""; }
-  _env_set() {
-    local key=$1 val=$2
-    if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
-      sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
-    else
-      echo "${key}=${val}" >> "$ENV_FILE"
-    fi
-  }
-
-  [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
-
-  # APP_URL
-  if [ -z "$(_env_get APP_URL)" ]; then
-    echo ""
-    printf "  ${C_CYAN}APP_URL${RESET} ${C_GRAY}[http://localhost]:${RESET} "
-    read -r app_url || true
-    _env_set APP_URL "${app_url:-http://localhost}"
-  fi
-
-  # Auto-generate secrets
-  [ -n "$(_env_get SESSION_SECRET)" ]    || { _env_set SESSION_SECRET "$(_gen_hex 32)";   _ok "SESSION_SECRET generiert"; }
-  [ -n "$(_env_get POSTGRES_PASSWORD)" ] || { _env_set POSTGRES_PASSWORD "$(_gen_safe 24)"; _ok "POSTGRES_PASSWORD generiert"; }
-
-  # Fixed values
-  _env_set VOLANTIC_CLIENT_ID "whisperx-app"
-  _env_set SMTP_PASSWORD "ahxL!f5RTvquxO*Q3br^Srb!wra8exu^fv96bJEMQkNfwd^N3#"
-  [ -n "$HF_TOKEN" ] && _env_set HF_TOKEN "$HF_TOKEN"
-
-  _ok ".env fertig: $ENV_FILE"
-fi
+# ── Secrets generieren (werden in Step 10 für .env genutzt) ──────────────
+SESSION_SECRET_VAL=$(_gen_hex 32)
+POSTGRES_PASSWORD_VAL=$(_gen_safe 24)
+_ok "SESSION_SECRET generiert"
+_ok "POSTGRES_PASSWORD generiert"
 
 printf "%b" "$HIDE_CURSOR"
 _progress "Konfiguration ✓"
@@ -476,20 +500,116 @@ _ok "Python-Umgebung: $PY_USED  ${C_GRAY}($VENV_DIR)${RESET}"
 _progress "Alles bereit  🎉"
 
 # ════════════════════════════════════════════════════════════
+# STEP 10: WEB-APP STARTEN (Repo + Docker)
+# ════════════════════════════════════════════════════════════
+_step "Web-App starten"
+
+APP_DIR="$HOME/.whisperx-app/app"
+REPO_URL="https://github.com/Raindancer118/whisperx-app.git"
+
+# ── git installieren falls nötig ──────────────────────────────────────────
+if ! command -v git &>/dev/null; then
+  _info "git wird benötigt..."
+  if command -v pacman &>/dev/null && sudo -n true 2>/dev/null; then
+    _run "git installieren (pacman)" sudo pacman -S --noconfirm git
+  elif command -v apt-get &>/dev/null && sudo -n true 2>/dev/null; then
+    _run "git installieren (apt)" sudo apt-get install -y git
+  elif command -v brew &>/dev/null; then
+    _run "git installieren (brew)" brew install git
+  else
+    _die "git nicht gefunden und konnte nicht installiert werden."
+  fi
+fi
+
+# ── Repo klonen oder aktualisieren ────────────────────────────────────────
+mkdir -p "$(dirname "$APP_DIR")"
+if [ -d "$APP_DIR/.git" ]; then
+  _run_bar "Repository aktualisieren" 20 git -C "$APP_DIR" pull --quiet || true
+  _ok "Repository aktualisiert"
+else
+  _run_bar "Repository klonen" 40 git clone "$REPO_URL" "$APP_DIR" --quiet || exit 1
+  _ok "Repository geklont: $APP_DIR"
+fi
+
+# ── .env schreiben ────────────────────────────────────────────────────────
+cat > "$APP_DIR/.env" <<ENVEOF
+APP_URL=${INSTALL_APP_URL}
+VOLANTIC_CLIENT_ID=whisperx-app
+SESSION_SECRET=${SESSION_SECRET_VAL}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD_VAL}
+SMTP_PASSWORD=ahxL!f5RTvquxO*Q3br^Srb!wra8exu^fv96bJEMQkNfwd^N3#
+HF_TOKEN=${HF_TOKEN}
+ENVEOF
+_ok ".env geschrieben → $APP_DIR/.env"
+
+# ── Container bauen + starten ─────────────────────────────────────────────
+echo ""
+printf "  ${C_GRAY}Erster Start: CUDA-Image + Node-Build — das dauert ein paar Minuten.${RESET}\n"
+printf "  ${C_GRAY}Lehn dich zurück. ☕${RESET}\n"
+echo ""
+
+# docker compose: direkter Aufruf, sudo-Fallback, sg-Fallback
+_docker_compose_up() {
+  cd "$APP_DIR" || return 1
+  if docker info >/dev/null 2>&1; then
+    docker compose up -d --build
+  elif sudo -n docker info >/dev/null 2>&1; then
+    sudo docker compose up -d --build
+  elif command -v sg >/dev/null 2>&1; then
+    sg docker "cd '$APP_DIR' && docker compose up -d --build"
+  else
+    echo "Docker nicht erreichbar — bitte Terminal neu starten (docker-Gruppe)" >&2
+    return 1
+  fi
+}
+
+_run_bar "Container bauen + starten" 600 bash -c "
+  cd '$APP_DIR' || exit 1
+  if docker info >/dev/null 2>&1; then
+    docker compose up -d --build
+  elif sudo -n docker info >/dev/null 2>&1; then
+    sudo docker compose up -d --build
+  elif command -v sg >/dev/null 2>&1; then
+    sg docker \"cd '$APP_DIR' && docker compose up -d --build\"
+  else
+    echo 'Docker nicht erreichbar — bitte Terminal neu starten (docker-Gruppe)' >&2
+    exit 1
+  fi
+" || {
+  _err "Container-Start fehlgeschlagen — Details:"
+  cat /tmp/wx_install.log >&2
+  _warn "Tipp: Terminal neu starten (docker-Gruppe) und dann:"
+  printf "    ${C_CYAN}cd %s && docker compose up -d --build${RESET}\n" "$APP_DIR"
+  exit 1
+}
+
+# ── Container-Status anzeigen ─────────────────────────────────────────────
+echo ""
+_info "Laufende Container:"
+( cd "$APP_DIR" 2>/dev/null && docker compose ps 2>/dev/null ) | tail -n +2 | while IFS= read -r line; do
+  printf "    ${C_GRAY}%s${RESET}\n" "$line"
+done
+
+echo ""
+_ok "${C_WHITE}${BOLD}Web-App erreichbar:${RESET}  ${C_CYAN}${BOLD}${INSTALL_APP_URL}${RESET}"
+_progress "Web-App ✓ — läuft!"
+
+# ════════════════════════════════════════════════════════════
 # DONE
 # ════════════════════════════════════════════════════════════
 W=$(_width); INNER=$((W - 4))
 echo ""; echo ""
 printf "${C_GRAY}  ╭"; printf '─%.0s' $(seq 1 $INNER); printf "╮${RESET}\n"
 printf "${C_GRAY}  │${RESET}%-${INNER}s${C_GRAY}│${RESET}\n" ""
-printf "${C_GRAY}  │${RESET}  ${C_GREEN}${BOLD}✓ Alles installiert. Du bist ready. 🚀${RESET}%-$((INNER-42))s${C_GRAY}│${RESET}\n" ""
+printf "${C_GRAY}  │${RESET}  ${C_GREEN}${BOLD}✓ Alles installiert und gestartet. 🚀${RESET}%-$((INNER-40))s${C_GRAY}│${RESET}\n" ""
 printf "${C_GRAY}  │${RESET}%-${INNER}s${C_GRAY}│${RESET}\n" ""
-printf "${C_GRAY}  │${RESET}  ${C_WHITE}Starte jetzt:${RESET}%-$((INNER-15))s${C_GRAY}│${RESET}\n" ""
+printf "${C_GRAY}  │${RESET}  ${C_WHITE}Web-App:${RESET}  ${C_CYAN}${BOLD}${INSTALL_APP_URL}${RESET}%-$((INNER - 12 - ${#INSTALL_APP_URL}))s${C_GRAY}│${RESET}\n" ""
+printf "${C_GRAY}  │${RESET}%-${INNER}s${C_GRAY}│${RESET}\n" ""
+printf "${C_GRAY}  │${RESET}  ${C_WHITE}CLI-Befehle:${RESET}%-$((INNER-14))s${C_GRAY}│${RESET}\n" ""
 printf "${C_GRAY}  │${RESET}%-${INNER}s${C_GRAY}│${RESET}\n" ""
 printf "${C_GRAY}  │${RESET}    ${C_CYAN}whisperx-app${RESET}%-$((INNER-28))s${C_GRAY}│${RESET}\n" "  ${C_GRAY}→ Interaktiver Flow${RESET}"
 printf "${C_GRAY}  │${RESET}    ${C_CYAN}whisperx-app transcribe audio.mp3${RESET}%-$((INNER-48))s${C_GRAY}│${RESET}\n" "  ${C_GRAY}→ Direkt loslegen${RESET}"
 printf "${C_GRAY}  │${RESET}    ${C_CYAN}whisperx-app check${RESET}%-$((INNER-34))s${C_GRAY}│${RESET}\n" "  ${C_GRAY}→ Systemcheck${RESET}"
-printf "${C_GRAY}  │${RESET}    ${C_CYAN}whisperx-app update${RESET}%-$((INNER-35))s${C_GRAY}│${RESET}\n" "  ${C_GRAY}→ Auf Updates prüfen${RESET}"
 printf "${C_GRAY}  │${RESET}%-${INNER}s${C_GRAY}│${RESET}\n" ""
 printf "${C_GRAY}  ╰"; printf '─%.0s' $(seq 1 $INNER); printf "╯${RESET}\n"
 
