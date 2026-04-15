@@ -164,18 +164,33 @@ if [ -z "$PYTHON" ]; then
   _warn "Kein Python 3.10–3.13 gefunden (whisperx benötigt <3.14)"
   _info "Installiere Python 3.11 über Paketmanager..."
 
+  PY_INSTALLED=false
   if command -v pacman &>/dev/null && sudo -n true 2>/dev/null; then
-    _run "Python 3.11 installieren (pacman)" sudo pacman -S --noconfirm python311 2>/dev/null \
-      || _run "Python 3.11 installieren (pacman)" sudo pacman -S --noconfirm python3.11
+    # On Arch/Manjaro the package is 'python311' (no dot) in extra repo
+    _info "Installiere python311 via pacman..."
+    if sudo pacman -S --noconfirm python311 >/tmp/wx_py.log 2>&1; then
+      _ok "Python 3.11 installiert (pacman)"
+      PY_INSTALLED=true
+    else
+      _info "python311 nicht gefunden, versuche python3.11..."
+      if sudo pacman -S --noconfirm python3.11 >/tmp/wx_py.log 2>&1; then
+        _ok "Python 3.11 installiert (pacman)"
+        PY_INSTALLED=true
+      fi
+    fi
 
   elif command -v apt-get &>/dev/null && sudo -n true 2>/dev/null; then
     _run "apt update"                     sudo apt-get update -qq
     _run "Python 3.11 installieren (apt)" sudo apt-get install -y python3.11 python3.11-venv
+    PY_INSTALLED=true
 
   elif command -v brew &>/dev/null; then
     _run "Python 3.11 installieren (brew)" brew install python@3.11
+    PY_INSTALLED=true
+  fi
 
-  else
+  if ! $PY_INSTALLED; then
+    cat /tmp/wx_py.log >&2 2>/dev/null || true
     _die "Kein kompatibles Python gefunden und kein Paketmanager verfügbar.
     Bitte Python 3.11 manuell installieren: https://www.python.org/downloads/"
   fi
