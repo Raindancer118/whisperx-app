@@ -1,0 +1,102 @@
+version: "3.9"
+
+services:
+  # ── nginx: reverse proxy + static frontend ───────────────────────────────
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "${PORT:-80}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ── FastAPI ───────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
+      REDIS_URL: "redis://redis:6379/0"
+      VOLANTIC_CLIENT_ID: "${VOLANTIC_CLIENT_ID}"
+      VOLANTIC_CLIENT_SECRET: "${VOLANTIC_CLIENT_SECRET}"
+      SESSION_SECRET: "${SESSION_SECRET}"
+      SMTP_HOST: "mx.volantic.de"
+      SMTP_PORT: "587"
+      SMTP_USER: "noreply@volantic.de"
+      SMTP_PASSWORD: "${SMTP_PASSWORD}"
+      APP_URL: "${APP_URL:-http://localhost}"
+    volumes:
+      - uploads:/data/uploads
+      - results:/data/results
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Celery worker (GPU access, heavy ML) ──────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
+      REDIS_URL: "redis://redis:6379/0"
+      SMTP_HOST: "mx.volantic.de"
+      SMTP_PORT: "587"
+      SMTP_USER: "noreply@volantic.de"
+      SMTP_PASSWORD: "${SMTP_PASSWORD}"
+      APP_URL: "${APP_URL:-http://localhost}"
+    volumes:
+      - uploads:/data/uploads
+      - results:/data/results
+      - model_cache:/root/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: whisperx
+      POSTGRES_USER: whisperx
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whisperx"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  results:
+  model_cache:

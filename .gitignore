@@ -37,3 +37,11 @@ Thumbs.db
 
 # WhisperX cache (user-local, not committed)
 .whisperx/
+
+# Docker data volumes (uploaded audio, results)
+data/uploads/
+data/results/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
