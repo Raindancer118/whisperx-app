@@ -167,11 +167,13 @@ if [ -z "$PYTHON" ]; then
   PY_INSTALLED=false
 
   # ── Manjaro / Arch: prefer pamac (handles both official repos + AUR) ──────
-  if command -v pamac &>/dev/null; then
+  # Run as sudo so pamac uses the already-cached sudo credentials instead of
+  # triggering a separate polkit password prompt.
+  if command -v pamac &>/dev/null && sudo -n true 2>/dev/null; then
     _info "Manjaro erkannt — nutze pamac (unterstützt AUR)..."
     for pkg in python311 python312 python313; do
       _info "Versuche $pkg..."
-      if pamac install --no-confirm "$pkg" >/tmp/wx_py.log 2>&1; then
+      if sudo pamac install --no-confirm "$pkg" >/tmp/wx_py.log 2>&1; then
         _ok "Python installiert via pamac ($pkg)"
         PY_INSTALLED=true
         break
