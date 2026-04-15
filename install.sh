@@ -205,7 +205,6 @@ if [ -z "$PYTHON" ]; then
     eval "$(pyenv init - 2>/dev/null)" 2>/dev/null || true
     _info "Python 3.11 via pyenv installieren (das dauert einen Moment)..."
     if pyenv install -s 3.11.9 >/tmp/wx_pyenv.log 2>&1; then
-      pyenv global 3.11.9 2>/dev/null || true
       PYTHON="$PYENV_ROOT/versions/3.11.9/bin/python3"
       PY_VER="3.11"
       _ok "Python 3.11 via pyenv installiert"
