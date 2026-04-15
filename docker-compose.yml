@@ -51,6 +51,7 @@ services:
       SMTP_HOST: "mx.volantic.de"
       SMTP_PORT: "587"
       SMTP_USER: "noreply@volantic.de"
+      HF_TOKEN: "${HF_TOKEN}"
       SMTP_PASSWORD: "${SMTP_PASSWORD}"
       APP_URL: "${APP_URL:-http://localhost}"
     volumes:

@@ -42,7 +42,7 @@ def build_authorize_url(state: str, code_verifier: str) -> str:
 
 
 async def exchange_code(code: str, code_verifier: str) -> dict:
-    """Exchange authorization code for tokens."""
+    """Exchange authorization code for tokens (public PKCE client — no secret)."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             TOKEN_URL,
@@ -51,7 +51,6 @@ async def exchange_code(code: str, code_verifier: str) -> dict:
                 "code": code,
                 "redirect_uri": REDIRECT_URI,
                 "client_id": VOLANTIC_CLIENT_ID,
-                "client_secret": VOLANTIC_CLIENT_SECRET,
                 "code_verifier": code_verifier,
             },
         )
