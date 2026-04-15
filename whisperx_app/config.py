@@ -33,7 +33,7 @@ class Config(BaseModel):
     volantic_issuer: str = "https://accounts.volantic.de"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    last_update_check: Optional[str] = None  # ISO timestamp of last PyPI version check
+    last_update_check: Optional[str] = None  # ISO timestamp of last GitHub version check
 
 
 def ensure_config_dir() -> None:

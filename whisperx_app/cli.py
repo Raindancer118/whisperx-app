@@ -143,7 +143,7 @@ def cmd_uninstall(
 
 @app.command("update")
 def cmd_update(
-    force: Annotated[bool, typer.Option("--force", "-f", help="TTL ignorieren, immer PyPI prüfen")] = False,
+    force: Annotated[bool, typer.Option("--force", "-f", help="TTL ignorieren, immer GitHub prüfen")] = False,
 ) -> None:
     """Auf neue Version prüfen und bei Bedarf aktualisieren."""
     from whisperx_app.updater import check_and_update
