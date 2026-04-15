@@ -166,14 +166,17 @@ if [ -z "$PYTHON" ]; then
 
   PY_INSTALLED=false
   if command -v pacman &>/dev/null && sudo -n true 2>/dev/null; then
+    # Sync package database first (avoids "target not found" on stale DBs)
+    _info "Paket-Datenbank aktualisieren (pacman -Sy)..."
+    sudo pacman -Sy --noconfirm >/tmp/wx_py.log 2>&1 || true
     # On Arch/Manjaro the package is 'python311' (no dot) in extra repo
     _info "Installiere python311 via pacman..."
-    if sudo pacman -S --noconfirm python311 >/tmp/wx_py.log 2>&1; then
+    if sudo pacman -S --noconfirm python311 >>/tmp/wx_py.log 2>&1; then
       _ok "Python 3.11 installiert (pacman)"
       PY_INSTALLED=true
     else
-      _info "python311 nicht gefunden, versuche python3.11..."
-      if sudo pacman -S --noconfirm python3.11 >/tmp/wx_py.log 2>&1; then
+      _info "python311 nicht im Repo — versuche python3.11..."
+      if sudo pacman -S --noconfirm python3.11 >>/tmp/wx_py.log 2>&1; then
         _ok "Python 3.11 installiert (pacman)"
         PY_INSTALLED=true
       fi
@@ -189,10 +192,28 @@ if [ -z "$PYTHON" ]; then
     PY_INSTALLED=true
   fi
 
+  # ── pyenv fallback: works on any Linux/macOS if package manager failed ──
   if ! $PY_INSTALLED; then
-    cat /tmp/wx_py.log >&2 2>/dev/null || true
-    _die "Kein kompatibles Python gefunden und kein Paketmanager verfügbar.
-    Bitte Python 3.11 manuell installieren: https://www.python.org/downloads/"
+    _warn "Paketmanager konnte Python 3.11 nicht installieren — versuche pyenv..."
+    export PYENV_ROOT="$HOME/.pyenv"
+    if [ ! -d "$PYENV_ROOT" ]; then
+      _info "pyenv installieren..."
+      curl -fsSL https://pyenv.run | bash >/tmp/wx_pyenv.log 2>&1 \
+        || _die "pyenv-Installation fehlgeschlagen. Bitte Python 3.11 manuell installieren: https://www.python.org/downloads/"
+    fi
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init - 2>/dev/null)" 2>/dev/null || true
+    _info "Python 3.11 via pyenv installieren (das dauert einen Moment)..."
+    if pyenv install -s 3.11.9 >/tmp/wx_pyenv.log 2>&1; then
+      pyenv global 3.11.9 2>/dev/null || true
+      PYTHON="$PYENV_ROOT/versions/3.11.9/bin/python3"
+      PY_VER="3.11"
+      _ok "Python 3.11 via pyenv installiert"
+      PY_INSTALLED=true
+    else
+      cat /tmp/wx_pyenv.log >&2
+      _die "Python 3.11 konnte nicht installiert werden. Bitte manuell: https://www.python.org/downloads/"
+    fi
   fi
 
   # Re-check after install
