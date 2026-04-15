@@ -32,7 +32,7 @@ _warn()   { printf "  ${C_YELLOW}!${RESET}  %b\n" "$*"; }
 _err()    { printf "  ${C_RED}✗${RESET}  %b\n" "$*" >&2; }
 _die()    { _err "$*"; printf "%b" "$SHOW_CURSOR"; exit 1; }
 
-TOTAL_STEPS=7; CURRENT_STEP=0
+TOTAL_STEPS=8; CURRENT_STEP=0
 
 _step() {
   CURRENT_STEP=$(( CURRENT_STEP + 1 ))
@@ -360,7 +360,101 @@ _ok "Wrapper: $WRAPPER"
 _progress "WhisperX-App ✓"
 
 # ════════════════════════════════════════════════════════════
-# STEP 7: VERIFY
+# STEP 7: KONFIGURATION
+# ════════════════════════════════════════════════════════════
+_step "Konfiguration"
+printf "%b" "$SHOW_CURSOR"  # cursor on for password input
+
+_gen_hex()  { python3 -c "import secrets; print(secrets.token_hex($1))" 2>/dev/null \
+              || openssl rand -hex "$1" 2>/dev/null || echo "change-me-$(date +%s)"; }
+_gen_safe() { python3 -c "import secrets; print(secrets.token_urlsafe($1))" 2>/dev/null \
+              || openssl rand -base64 "$1" 2>/dev/null | tr -d '=\n'; }
+
+# ── HuggingFace Token ─────────────────────────────────────────────────────
+HF_TOKEN=""
+HF_CFG="$HOME/.whisperx/config.json"
+
+# Check if already configured
+if [ -f "$HF_CFG" ]; then
+  existing_token=$(python3 -c "import json; d=json.load(open('$HF_CFG')); print(d.get('hf_token') or '')" 2>/dev/null || true)
+  if [ -n "$existing_token" ] && [ "$existing_token" != "null" ]; then
+    HF_TOKEN="$existing_token"
+    _ok "HuggingFace-Token bereits konfiguriert"
+  fi
+fi
+
+if [ -z "$HF_TOKEN" ]; then
+  echo ""
+  printf "  ${C_WHITE}${BOLD}HuggingFace-Token${RESET} ${C_GRAY}(für Sprecher-Diarisierung)${RESET}\n"
+  printf "  ${C_GRAY}Token erstellen: https://hf.co/settings/tokens${RESET}\n"
+  printf "  ${C_GRAY}Nutzungsbed.:   https://hf.co/pyannote/speaker-diarization-3.1${RESET}\n"
+  echo ""
+  printf "  ${C_CYAN}HF_TOKEN${RESET} ${C_GRAY}(Enter zum Überspringen):${RESET} "
+  read -rs HF_TOKEN || true
+  echo ""
+  if [ -n "$HF_TOKEN" ]; then
+    mkdir -p "$HOME/.whisperx"
+    if [ -f "$HF_CFG" ]; then
+      python3 -c "
+import json, sys
+with open('$HF_CFG') as f: d = json.load(f)
+d['hf_token'] = '$HF_TOKEN'
+with open('$HF_CFG', 'w') as f: json.dump(d, f, indent=2)
+" 2>/dev/null && _ok "HF_TOKEN in ~/.whisperx/config.json gespeichert"
+    else
+      echo "{\"hf_token\": \"$HF_TOKEN\"}" > "$HF_CFG"
+      _ok "HF_TOKEN gespeichert"
+    fi
+  else
+    _warn "Übersprungen — Sprecher-Diarisierung nicht verfügbar bis Token gesetzt"
+  fi
+fi
+
+# ── Docker .env (nur wenn docker-compose.yml im aktuellen Verzeichnis) ────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+if [ -f "$SCRIPT_DIR/docker-compose.yml" ]; then
+  _info "docker-compose.yml gefunden — generiere .env..."
+
+  # Helper: wert aus .env lesen
+  _env_get() { grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo ""; }
+  _env_set() {
+    local key=$1 val=$2
+    if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+      sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+    else
+      echo "${key}=${val}" >> "$ENV_FILE"
+    fi
+  }
+
+  [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
+
+  # APP_URL
+  if [ -z "$(_env_get APP_URL)" ]; then
+    echo ""
+    printf "  ${C_CYAN}APP_URL${RESET} ${C_GRAY}[http://localhost]:${RESET} "
+    read -r app_url || true
+    _env_set APP_URL "${app_url:-http://localhost}"
+  fi
+
+  # Auto-generate secrets
+  [ -n "$(_env_get SESSION_SECRET)" ]    || { _env_set SESSION_SECRET "$(_gen_hex 32)";   _ok "SESSION_SECRET generiert"; }
+  [ -n "$(_env_get POSTGRES_PASSWORD)" ] || { _env_set POSTGRES_PASSWORD "$(_gen_safe 24)"; _ok "POSTGRES_PASSWORD generiert"; }
+
+  # Fixed values
+  _env_set VOLANTIC_CLIENT_ID "whisperx-app"
+  _env_set SMTP_PASSWORD "ahxL!f5RTvquxO*Q3br^Srb!wra8exu^fv96bJEMQkNfwd^N3#"
+  [ -n "$HF_TOKEN" ] && _env_set HF_TOKEN "$HF_TOKEN"
+
+  _ok ".env fertig: $ENV_FILE"
+fi
+
+printf "%b" "$HIDE_CURSOR"
+_progress "Konfiguration ✓"
+
+# ════════════════════════════════════════════════════════════
+# STEP 8: VERIFY
 # ════════════════════════════════════════════════════════════
 _step "Alles checken"
 
@@ -396,8 +490,6 @@ printf "${C_GRAY}  │${RESET}    ${C_CYAN}whisperx-app${RESET}%-$((INNER-28))s$
 printf "${C_GRAY}  │${RESET}    ${C_CYAN}whisperx-app transcribe audio.mp3${RESET}%-$((INNER-48))s${C_GRAY}│${RESET}\n" "  ${C_GRAY}→ Direkt loslegen${RESET}"
 printf "${C_GRAY}  │${RESET}    ${C_CYAN}whisperx-app check${RESET}%-$((INNER-34))s${C_GRAY}│${RESET}\n" "  ${C_GRAY}→ Systemcheck${RESET}"
 printf "${C_GRAY}  │${RESET}    ${C_CYAN}whisperx-app update${RESET}%-$((INNER-35))s${C_GRAY}│${RESET}\n" "  ${C_GRAY}→ Auf Updates prüfen${RESET}"
-printf "${C_GRAY}  │${RESET}%-${INNER}s${C_GRAY}│${RESET}\n" ""
-printf "${C_GRAY}  │${RESET}  ${DIM}Beim ersten Start: HuggingFace-Token eingeben (für Sprecher-Erkennung)${RESET}%-$((INNER-71))s${C_GRAY}│${RESET}\n" ""
 printf "${C_GRAY}  │${RESET}%-${INNER}s${C_GRAY}│${RESET}\n" ""
 printf "${C_GRAY}  ╰"; printf '─%.0s' $(seq 1 $INNER); printf "╯${RESET}\n"
 
