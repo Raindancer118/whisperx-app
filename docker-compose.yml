@@ -1,16 +1,21 @@
 version: "3.9"
 
+# ── Topology when using an external Nginx Proxy Manager ──────────────────────
+#
+#   NPM (other server)
+#     ├── /crowd           → WebSocket  → this_host:8000  (FastAPI)
+#     ├── /api/ /auth/ … → HTTP        → this_host:8000  (FastAPI)
+#     └── /              → HTTP        → this_host:8080  (frontend)
+#
+# Set APP_HOST in your .env to the LAN/public IP of this machine so NPM
+# can reach it, e.g. APP_HOST=192.168.1.42
+#
+# Bind address for exposed ports (default: all interfaces).
+# Set BIND_ADDR=127.0.0.1 if NPM runs on the same host and you want to
+# restrict access to localhost only.
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
-  # ── nginx: reverse proxy + static frontend ───────────────────────────────
-  nginx:
-    build:
-      context: .
-      dockerfile: nginx/Dockerfile
-    ports:
-      - "${PORT:-80}:80"
-    depends_on:
-      - api
-    restart: unless-stopped
 
   # ── FastAPI ───────────────────────────────────────────────────────────────
   api:
@@ -18,17 +23,25 @@ services:
       context: .
       dockerfile: Dockerfile
       target: api
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${API_PORT:-8000}:8000"
     environment:
-      DATABASE_URL: "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
-      REDIS_URL: "redis://redis:6379/0"
-      VOLANTIC_CLIENT_ID: "${VOLANTIC_CLIENT_ID}"
+      DATABASE_URL:          "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
+      REDIS_URL:             "redis://redis:6379/0"
+      VOLANTIC_CLIENT_ID:    "${VOLANTIC_CLIENT_ID}"
       VOLANTIC_CLIENT_SECRET: "${VOLANTIC_CLIENT_SECRET}"
-      SESSION_SECRET: "${SESSION_SECRET}"
-      SMTP_HOST: "mx.volantic.de"
-      SMTP_PORT: "587"
-      SMTP_USER: "noreply@volantic.de"
-      SMTP_PASSWORD: "${SMTP_PASSWORD}"
-      APP_URL: "${APP_URL:-http://localhost}"
+      SESSION_SECRET:        "${SESSION_SECRET}"
+      SMTP_HOST:             "mx.volantic.de"
+      SMTP_PORT:             "587"
+      SMTP_USER:             "noreply@volantic.de"
+      SMTP_PASSWORD:         "${SMTP_PASSWORD}"
+      APP_URL:               "${APP_URL:-http://localhost}"
+      CROWD_API_KEY:         "${CROWD_API_KEY}"
+      OLLAMA_MODEL:          "${OLLAMA_MODEL:-gemma4:e4b}"
+      OLLAMA_BASE_URL:       "${OLLAMA_BASE_URL:-http://localhost:11434}"
+      OLLAMA_TIMEOUT:        "${OLLAMA_TIMEOUT:-300}"
+      CROWD_LIVE_MODEL:      "${CROWD_LIVE_MODEL:-base}"
+      CROWD_ROLLING_INTERVAL: "${CROWD_ROLLING_INTERVAL:-30}"
     volumes:
       - uploads:/data/uploads
       - results:/data/results
@@ -39,6 +52,15 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ── Frontend static server ────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile   # reuses the existing 2-stage build
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${FRONTEND_PORT:-8080}:80"
+    restart: unless-stopped
+
   # ── Celery worker (GPU access, heavy ML) ──────────────────────────────────
   worker:
     build:
@@ -47,13 +69,13 @@ services:
       target: worker
     environment:
       DATABASE_URL: "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
-      REDIS_URL: "redis://redis:6379/0"
-      SMTP_HOST: "mx.volantic.de"
-      SMTP_PORT: "587"
-      SMTP_USER: "noreply@volantic.de"
-      HF_TOKEN: "${HF_TOKEN}"
+      REDIS_URL:    "redis://redis:6379/0"
+      SMTP_HOST:    "mx.volantic.de"
+      SMTP_PORT:    "587"
+      SMTP_USER:    "noreply@volantic.de"
+      HF_TOKEN:     "${HF_TOKEN}"
       SMTP_PASSWORD: "${SMTP_PASSWORD}"
-      APP_URL: "${APP_URL:-http://localhost}"
+      APP_URL:      "${APP_URL:-http://localhost}"
     volumes:
       - uploads:/data/uploads
       - results:/data/results
@@ -76,8 +98,8 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: whisperx
-      POSTGRES_USER: whisperx
+      POSTGRES_DB:       whisperx
+      POSTGRES_USER:     whisperx
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
     volumes:
       - pgdata:/var/lib/postgresql/data
