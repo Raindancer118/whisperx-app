@@ -24,7 +24,7 @@ INSTALL_TRACKER_FILE = CONFIG_DIR / "installed_by_app.json"
 
 class Config(BaseModel):
     hf_token: Optional[str] = None
-    default_model: str = "large-v3"
+    default_model: str = "medium"
     default_device: str = "auto"
     model_cache_dir: str = str(Path.home() / ".whisperx" / "models")
     api_batch_size_gpu: int = 16
