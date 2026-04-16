@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -69,3 +69,22 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str
     available_models: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Crowd / Postbox
+# ---------------------------------------------------------------------------
+
+class PostboxResponse(BaseModel):
+    """Response from GET /api/v1/postbox/{session_id}.
+
+    status values:
+      nomailyet    — post-processing still in progress
+      wontcome     — processing failed; see *error* field for details
+      maildelivery — result ready; see *transcript* and *summary*
+    """
+    status: Literal["nomailyet", "wontcome", "maildelivery"]
+    session_id: Optional[str] = None
+    transcript: Optional[str] = None
+    summary: Optional[str] = None
+    error: Optional[str] = None

@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from whisperx_app import __version__
 from whisperx_app.api.job_store import job_store
 from whisperx_app.api.routes import health, transcribe
+from whisperx_app.api.routes.crowd import router as crowd_router
 from whisperx_app.api.routes.web_auth import router as web_auth_router
 from whisperx_app.api.routes.web_jobs import router as web_jobs_router
 
@@ -65,5 +66,8 @@ def create_app() -> FastAPI:
     # Web API (session cookie)
     app.include_router(web_auth_router)
     app.include_router(web_jobs_router)
+
+    # Crowd / Discord live-stream pipeline
+    app.include_router(crowd_router)
 
     return app
