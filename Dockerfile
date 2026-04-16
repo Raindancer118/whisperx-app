@@ -50,10 +50,10 @@ RUN pip install --upgrade pip && \
     "librosa>=0.10" "soundfile>=0.12" \
     "sqlalchemy[asyncio]>=2.0" "asyncpg>=0.29" \
     "celery[redis]>=5.3" "redis>=5.0" "aiosmtplib>=3.0" \
-    "pydantic>=2.0" "aiofiles>=23.0"
+    "pydantic>=2.0" "aiofiles>=23.0" "httpx>=0.27"
 
 # ── Worker target ────────────────────────────────────────────────────────
 FROM worker_deps AS worker
 COPY whisperx_app/ ./whisperx_app/
 CMD ["celery", "-A", "whisperx_app.celery_app", "worker", \
-     "--loglevel=info", "--concurrency=1", "-Q", "transcription"]
+     "--loglevel=info", "--concurrency=1", "-Q", "transcription,celery"]

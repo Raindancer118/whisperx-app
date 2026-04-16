@@ -19,7 +19,10 @@ celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-    task_routes={"whisperx_app.tasks.transcribe_job": {"queue": "transcription"}},
+    task_routes={
+        "whisperx_app.tasks.transcribe_job": {"queue": "transcription"},
+        "whisperx_app.tasks.process_stream_task": {"queue": "transcription"},
+    },
     worker_prefetch_multiplier=1,  # one job at a time (GPU)
     task_acks_late=True,
 )

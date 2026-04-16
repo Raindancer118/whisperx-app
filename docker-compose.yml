@@ -1,21 +1,44 @@
 version: "3.9"
 
-# ── Topology when using an external Nginx Proxy Manager ──────────────────────
+# ── Network topology (external Nginx Proxy Manager) ──────────────────────────
 #
-#   NPM (other server)
-#     ├── /crowd           → WebSocket  → this_host:8000  (FastAPI)
-#     ├── /api/ /auth/ … → HTTP        → this_host:8000  (FastAPI)
-#     └── /              → HTTP        → this_host:8080  (frontend)
+#   NPM (volantic.de)
+#     ├── /crowd         → WebSocket → this_host:8000  (api)
+#     ├── /api /auth … → HTTP        → this_host:8000  (api)
+#     └── /              → HTTP      → this_host:8080  (frontend)
 #
-# Set APP_HOST in your .env to the LAN/public IP of this machine so NPM
-# can reach it, e.g. APP_HOST=192.168.1.42
-#
-# Bind address for exposed ports (default: all interfaces).
-# Set BIND_ADDR=127.0.0.1 if NPM runs on the same host and you want to
-# restrict access to localhost only.
+# Ports are bound to BIND_ADDR (default: all interfaces).
+# Set BIND_ADDR=127.0.0.1 if NPM runs on the same host.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
+
+  # ── Ollama — local Gemma 4 inference ─────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 30s
+
+  # ── Ollama model initialiser (runs once; exits after pull) ────────────────
+  ollama-init:
+    image: curlimages/curl:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-gemma4:e2b}"
+      OLLAMA_HOST:  "http://ollama:11434"
+    volumes:
+      - ./scripts/ollama-init.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    restart: "no"
 
   # ── FastAPI ───────────────────────────────────────────────────────────────
   api:
@@ -26,21 +49,23 @@ services:
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${API_PORT:-8000}:8000"
     environment:
-      DATABASE_URL:          "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
-      REDIS_URL:             "redis://redis:6379/0"
-      VOLANTIC_CLIENT_ID:    "${VOLANTIC_CLIENT_ID}"
-      VOLANTIC_CLIENT_SECRET: "${VOLANTIC_CLIENT_SECRET}"
-      SESSION_SECRET:        "${SESSION_SECRET}"
-      SMTP_HOST:             "mx.volantic.de"
-      SMTP_PORT:             "587"
-      SMTP_USER:             "noreply@volantic.de"
-      SMTP_PASSWORD:         "${SMTP_PASSWORD}"
-      APP_URL:               "${APP_URL:-http://localhost}"
-      CROWD_API_KEY:         "${CROWD_API_KEY}"
-      OLLAMA_MODEL:          "${OLLAMA_MODEL:-gemma4:e4b}"
-      OLLAMA_BASE_URL:       "${OLLAMA_BASE_URL:-http://localhost:11434}"
-      OLLAMA_TIMEOUT:        "${OLLAMA_TIMEOUT:-300}"
-      CROWD_LIVE_MODEL:      "${CROWD_LIVE_MODEL:-base}"
+      DATABASE_URL:           "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
+      REDIS_URL:              "redis://redis:6379/0"
+      UPLOADS_DIR:            "/data/uploads"
+      RESULTS_DIR:            "/data/results"
+      VOLANTIC_CLIENT_ID:     "${VOLANTIC_CLIENT_ID}"
+      VOLANTIC_CLIENT_SECRET: "${VOLANTIC_CLIENT_SECRET:-}"
+      SESSION_SECRET:         "${SESSION_SECRET}"
+      SMTP_HOST:              "mx.volantic.de"
+      SMTP_PORT:              "587"
+      SMTP_USER:              "noreply@volantic.de"
+      SMTP_PASSWORD:          "${SMTP_PASSWORD}"
+      APP_URL:                "${APP_URL:-https://whisperx.volantic.de}"
+      HF_TOKEN:               "${HF_TOKEN}"
+      CROWD_API_KEY:          "${CROWD_API_KEY}"
+      OLLAMA_BASE_URL:        "http://ollama:11434"
+      OLLAMA_MODEL:           "${OLLAMA_MODEL:-gemma4:e2b}"
+      OLLAMA_TIMEOUT:         "${OLLAMA_TIMEOUT:-300}"
       CROWD_ROLLING_INTERVAL: "${CROWD_ROLLING_INTERVAL:-30}"
     volumes:
       - uploads:/data/uploads
@@ -50,32 +75,39 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
 
   # ── Frontend static server ────────────────────────────────────────────────
   frontend:
     build:
       context: .
-      dockerfile: nginx/Dockerfile   # reuses the existing 2-stage build
+      dockerfile: nginx/Dockerfile
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${FRONTEND_PORT:-8080}:80"
     restart: unless-stopped
 
-  # ── Celery worker (GPU access, heavy ML) ──────────────────────────────────
+  # ── Celery worker (full ML stack — WhisperX + Gemma via Ollama) ───────────
   worker:
     build:
       context: .
       dockerfile: Dockerfile
       target: worker
     environment:
-      DATABASE_URL: "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
-      REDIS_URL:    "redis://redis:6379/0"
-      SMTP_HOST:    "mx.volantic.de"
-      SMTP_PORT:    "587"
-      SMTP_USER:    "noreply@volantic.de"
-      HF_TOKEN:     "${HF_TOKEN}"
-      SMTP_PASSWORD: "${SMTP_PASSWORD}"
-      APP_URL:      "${APP_URL:-http://localhost}"
+      DATABASE_URL:    "postgresql+asyncpg://whisperx:${POSTGRES_PASSWORD}@postgres:5432/whisperx"
+      REDIS_URL:       "redis://redis:6379/0"
+      UPLOADS_DIR:     "/data/uploads"
+      RESULTS_DIR:     "/data/results"
+      SMTP_HOST:       "mx.volantic.de"
+      SMTP_PORT:       "587"
+      SMTP_USER:       "noreply@volantic.de"
+      HF_TOKEN:        "${HF_TOKEN}"
+      SMTP_PASSWORD:   "${SMTP_PASSWORD}"
+      APP_URL:         "${APP_URL:-https://whisperx.volantic.de}"
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_MODEL:    "${OLLAMA_MODEL:-gemma4:e2b}"
+      OLLAMA_TIMEOUT:  "${OLLAMA_TIMEOUT:-600}"
     volumes:
       - uploads:/data/uploads
       - results:/data/results
@@ -85,6 +117,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      ollama:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     deploy:
       resources:
@@ -123,3 +159,4 @@ volumes:
   uploads:
   results:
   model_cache:
+  ollama_models:
